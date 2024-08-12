@@ -18,11 +18,11 @@ terraform {
   required_providers {
     namecom = {
       source  = "arthurpro/namecom"
-      version = "1.0.0"
+      version = "~>1.0"
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "3.38.0"
+      version = "~>5.0"
     }
   }
 }
@@ -39,7 +39,7 @@ resource "aws_route53_zone" "example_com" {
 provider "namecom" {
   username = var.namecom_username
   token    = var.namecom_token
-  #  test     = true # enable to use test API
+  # test   = true # uncomment to use test API
 }
 # username and token default to NAMECOM_USER and NAMECOM_TOKEN environment variables
 

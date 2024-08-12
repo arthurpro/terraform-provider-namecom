@@ -34,7 +34,7 @@ func resourceRecord() *schema.Resource {
 				Type:             schema.TypeString,
 				Optional:         true,
 				Default:          "@",
-				DiffSuppressFunc: suppressHost,
+				DiffSuppressFunc: suppressDiff,
 				Description:      "Host is the hostname relative to the zone.",
 			},
 			"fqdn": {
@@ -43,10 +43,11 @@ func resourceRecord() *schema.Resource {
 				Description: "FQDN is the Fully Qualified Domain Name.",
 			},
 			"type": {
-				Type:         schema.TypeString,
-				Required:     true,
-				Description:  "Type is one of the following: A, AAAA, ANAME, CNAME, MX, NS, SRV, or TXT.",
-				ValidateFunc: validation.StringInSlice([]string{"A", "AAAA", "ANAME", "CNAME", "MX", "NS", "SRV", "TXT"}, true),
+				Type:             schema.TypeString,
+				Required:         true,
+				DiffSuppressFunc: suppressDiff,
+				Description:      "Type is one of the following: A, AAAA, ANAME, CNAME, MX, NS, SRV, or TXT.",
+				ValidateFunc:     validation.StringInSlice([]string{"A", "AAAA", "ANAME", "CNAME", "MX", "NS", "SRV", "TXT"}, true),
 			},
 			"answer": {
 				Type:        schema.TypeString,
@@ -62,7 +63,7 @@ func resourceRecord() *schema.Resource {
 			"priority": {
 				Type:             schema.TypeInt,
 				Optional:         true,
-				DiffSuppressFunc: suppressPriority,
+				DiffSuppressFunc: suppressDiff,
 				Description:      "Priority is only required for MX and SRV records, it is ignored for all others.",
 			},
 		},
@@ -266,17 +267,25 @@ func recordId(id string) (int32, error) {
 	return int32(recordID), err
 }
 
-func suppressHost(k, old, new string, d *schema.ResourceData) bool {
-	if old == "@" && new == "" {
-		return true
+func suppressDiff(k, old, new string, d *schema.ResourceData) bool {
+	switch k {
+	case "type":
+		if strings.ToUpper(old) == strings.ToUpper(new) {
+			return true
+		}
+		return false
+	case "host":
+		if old == "@" && new == "" {
+			return true
+		}
+		return false
+	case "priority":
+		recordType := strings.ToUpper(d.Get("type").(string))
+		if recordType != "MX" && recordType != "SRV" {
+			return true
+		}
+		return false
 	}
-	return false
-}
 
-func suppressPriority(k, old, new string, d *schema.ResourceData) bool {
-	recordType := strings.ToUpper(d.Get("type").(string))
-	if recordType != "MX" && recordType != "SRV" {
-		return true
-	}
 	return false
 }
