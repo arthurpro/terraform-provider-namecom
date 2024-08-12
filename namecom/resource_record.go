@@ -65,10 +65,6 @@ func resourceRecord() *schema.Resource {
 				DiffSuppressFunc: suppressPriority,
 				Description:      "Priority is only required for MX and SRV records, it is ignored for all others.",
 			},
-			"data": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
 		},
 	}
 }
@@ -248,7 +244,7 @@ func getRecordResourceData(d *schema.ResourceData) namecom.Record {
 	record := namecom.Record{
 		DomainName: d.Get("zone").(string),
 		Host:       host,
-		Type:       d.Get("type").(string),
+		Type:       strings.ToUpper(d.Get("type").(string)),
 		Answer:     d.Get("answer").(string),
 	}
 
@@ -278,7 +274,7 @@ func suppressHost(k, old, new string, d *schema.ResourceData) bool {
 }
 
 func suppressPriority(k, old, new string, d *schema.ResourceData) bool {
-	recordType := d.Get("type").(string)
+	recordType := strings.ToUpper(d.Get("type").(string))
 	if recordType != "MX" && recordType != "SRV" {
 		return true
 	}
