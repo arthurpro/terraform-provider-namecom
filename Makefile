@@ -1,4 +1,4 @@
-.PHONY: fmt build release mod $(PLATFORMS)
+.PHONY: fmt build release mod $(PLATFORMS) shasum clean
 GOFMT_FILES ?= $$(find . -name '?*.go' -maxdepth 2)
 NAME := terraform-provider-namecom
 PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
@@ -20,12 +20,11 @@ fmt:
 mod:
 	go mod download
 	go mod tidy
-	#go mod vendor
 
 build: fmt
-	GOPROXY="off" GOFLAGS="-mod=vendor" go build -ldflags="-X github.com/arthurpro/$(NAME)/version.ProviderVersion=$(VERSION)"
+	GOPROXY="off" go build -ldflags="-X github.com/arthurpro/$(NAME)/version.ProviderVersion=$(VERSION)"
 
-release: $(PLATFORMS)
+release: clean $(PLATFORMS) shasum
 
 $(PLATFORMS):
 	GOPROXY="off" GOOS=$(os) GOARCH=$(arch) go build -trimpath \
@@ -36,3 +35,10 @@ $(PLATFORMS):
 	cd $(RELEASE_DIR)/$(BASE)_$(os)_$(arch)/ && zip -qmr ../$(BASE)_$(os)_$(arch).zip .
 	rm -rf $(RELEASE_DIR)/$(BASE)_$(os)_$(arch)
 
+shasum:
+	cd release && \
+	shasum -a 256 *.zip > $(NAME)_$(VER)_SHA256SUMS && \
+	gpg --detach-sign $(NAME)_$(VER)_SHA256SUMS
+
+clean:
+	rm -rf release/

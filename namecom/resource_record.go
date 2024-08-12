@@ -1,10 +1,12 @@
 package namecom
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/namedotcom/go/v4/namecom"
@@ -13,24 +15,20 @@ import (
 
 func resourceRecord() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceRecordCreate,
-		Read:   resourceRecordRead,
-		Update: resourceRecordUpdate,
-		Delete: resourceRecordDelete,
+		CreateContext: resourceRecordCreate,
+		ReadContext:   resourceRecordRead,
+		UpdateContext: resourceRecordUpdate,
+		DeleteContext: resourceRecordDelete,
 		Importer: &schema.ResourceImporter{
-			State: resourceRecordImport,
+			StateContext: resourceRecordImporter,
 		},
 
 		Schema: map[string]*schema.Schema{
 			"zone": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Zone is the zone that the record belongs to.",
-			},
-			"domain_name": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "DomainName is the zone that the record belongs to.",
+				ForceNew:    true,
+				Description: "Zone is the domain name that the record belongs to.",
 			},
 			"host": {
 				Type:             schema.TypeString,
@@ -48,12 +46,12 @@ func resourceRecord() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				Description:  "Type is one of the following: A, AAAA, ANAME, CNAME, MX, NS, SRV, or TXT.",
-				ValidateFunc: validation.StringInSlice([]string{"A", "AAAA", "ANAME", "CNAME", "MX", "NS", "SRV", "TXT"}, false),
+				ValidateFunc: validation.StringInSlice([]string{"A", "AAAA", "ANAME", "CNAME", "MX", "NS", "SRV", "TXT"}, true),
 			},
-			"value": {
+			"answer": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Answer is either the IP address for A or AAAA records; the target for ANAME, CNAME, MX, or NS records; the text for TXT records. For SRV records, answer has the following format: \"{weight} {port} {target}\" e.g. \"1 5061 sip.example.org\".",
+				Description: `Answer is either the IP address for A or AAAA records; the target for ANAME, CNAME, MX, or NS records; the text for TXT records. For SRV records, answer has the following format: "{weight} {port} {target}" e.g. "1 5061 sip.example.org".`,
 			},
 			"ttl": {
 				Type:        schema.TypeInt,
@@ -75,85 +73,94 @@ func resourceRecord() *schema.Resource {
 	}
 }
 
-func resourceRecordCreate(d *schema.ResourceData, m interface{}) error {
+func resourceRecordCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 	record := getRecordResourceData(d)
 
 	if record, err := client.CreateRecord(&record); err != nil {
-		return errors.Wrap(err, "Error GetRecord")
+		return diag.FromErr(errors.Wrap(err, "Error GetRecord"))
 	} else {
-		setRecordResourceData(d, record)
+		err = setRecordResourceData(d, record)
+		if err != nil {
+			return diag.FromErr(err)
+		}
 	}
 
 	return nil
 }
 
-func resourceRecordRead(d *schema.ResourceData, m interface{}) error {
+func resourceRecordRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 
-	recordID, err := strconv.ParseInt(d.Id(), 10, 32)
+	recordID, err := recordId(d.Id())
 	if err != nil {
-		return errors.Wrap(err, "Error converting Record ID")
+		return diag.FromErr(errors.Wrap(err, "Error parsing RecordID, should be int32"))
 	}
 
 	request := namecom.GetRecordRequest{
-		DomainName: d.Get("domain_name").(string),
-		ID:         int32(recordID),
+		DomainName: d.Get("zone").(string),
+		ID:         recordID,
 	}
 
 	record, err := client.GetRecord(&request)
 	if err != nil {
-		return errors.Wrap(err, "Error GetRecord")
+		return diag.FromErr(errors.Wrap(err, "Error GetRecord"))
 	}
 
-	setRecordResourceData(d, record)
+	err = setRecordResourceData(d, record)
+	if err != nil {
+		return diag.FromErr(err)
+	}
 
 	return nil
 }
 
-func resourceRecordUpdate(d *schema.ResourceData, m interface{}) error {
+func resourceRecordUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 
-	recordID, err := strconv.ParseInt(d.Id(), 10, 32)
+	recordID, err := recordId(d.Id())
 	if err != nil {
-		return errors.Wrap(err, "Error Parsing Record ID")
+		return diag.FromErr(errors.Wrap(err, "Error parsing RecordID, should be int32"))
 	}
 
 	record := getRecordResourceData(d)
-	record.ID = int32(recordID)
+	record.ID = recordID
 
 	if record, err := client.UpdateRecord(&record); err != nil {
-		return errors.Wrap(err, "Error UpdateRecord")
+		return diag.FromErr(errors.Wrap(err, "Error UpdateRecord"))
 	} else {
-		setRecordResourceData(d, record)
+		err = setRecordResourceData(d, record)
+		if err != nil {
+			return diag.FromErr(err)
+		}
 	}
 
 	return nil
 }
 
-func resourceRecordDelete(d *schema.ResourceData, m interface{}) error {
+func resourceRecordDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 
-	recordID, err := strconv.ParseInt(d.Id(), 10, 32)
+	recordID, err := recordId(d.Id())
 	if err != nil {
-		return errors.Wrap(err, "Error converting Record ID")
+		return diag.FromErr(errors.Wrap(err, "Error parsing RecordID, should be int32"))
 	}
 
 	deleteRequest := namecom.DeleteRecordRequest{
-		DomainName: d.Get("domain_name").(string),
-		ID:         int32(recordID),
+		DomainName: d.Get("zone").(string),
+		ID:         recordID,
 	}
 
 	_, err = client.DeleteRecord(&deleteRequest)
 	if err != nil {
-		return errors.Wrap(err, "Error DeleteRecord")
+		return diag.FromErr(errors.Wrap(err, "Error DeleteRecord"))
 	}
 
 	d.SetId("")
 	return nil
 }
 
-func resourceRecordImport(d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+func resourceRecordImporter(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
 	client := m.(*namecom.NameCom)
 
 	idAttr := strings.SplitN(d.Id(), "/", 2)
@@ -163,16 +170,16 @@ func resourceRecordImport(d *schema.ResourceData, m interface{}) ([]*schema.Reso
 		domain = idAttr[0]
 		record = idAttr[1]
 	} else {
-		return nil, fmt.Errorf("invalid id %q specified, should be in format \"DomainName/RecordID\" for import", d.Id())
+		return nil, fmt.Errorf(`invalid id %q specified, should be in format "DomainName/RecordID" for import`, d.Id())
 	}
-	recordID, err := strconv.ParseInt(record, 10, 32)
+	recordID, err := recordId(record)
 	if err != nil {
-		return nil, errors.Wrap(err, "Error converting Record ID")
+		return nil, errors.Wrap(err, "Error parsing RecordID, should be int")
 	}
 
 	request := namecom.GetRecordRequest{
 		DomainName: domain,
-		ID:         int32(recordID),
+		ID:         recordID,
 	}
 
 	r, err := client.GetRecord(&request)
@@ -180,28 +187,57 @@ func resourceRecordImport(d *schema.ResourceData, m interface{}) ([]*schema.Reso
 		return nil, errors.Wrap(err, "Error GetRecord")
 	}
 
-	setRecordResourceData(d, r)
+	err = setRecordResourceData(d, r)
+	if err != nil {
+		return nil, err
+	}
 
 	return []*schema.ResourceData{d}, nil
 }
 
-func setRecordResourceData(d *schema.ResourceData, r *namecom.Record) {
+func setRecordResourceData(d *schema.ResourceData, r *namecom.Record) error {
 	host := r.Host
 	if host == "" {
 		host = "@"
 	}
-	d.SetId(strconv.Itoa(int(r.ID)))
-	d.Set("zone", r.DomainName)
-	d.Set("domain_name", r.DomainName)
-	d.Set("host", host)
-	d.Set("type", r.Type)
-	d.Set("fqdn", r.Fqdn)
-	d.Set("value", r.Answer)
-	d.Set("ttl", r.TTL)
-	d.Set("priority", r.Priority)
+	d.SetId(fmt.Sprintf("%d", r.ID))
 
-	//data, _ := json.Marshal(r)
-	//d.Set("data", string(data))
+	err := d.Set("zone", r.DomainName)
+	if err != nil {
+		return errors.New("Error setting zone")
+	}
+
+	err = d.Set("host", host)
+	if err != nil {
+		return errors.New("Error setting host")
+	}
+
+	err = d.Set("type", r.Type)
+	if err != nil {
+		return errors.New("Error setting type")
+	}
+
+	err = d.Set("fqdn", r.Fqdn)
+	if err != nil {
+		return errors.New("Error setting fqdn")
+	}
+
+	err = d.Set("answer", r.Answer)
+	if err != nil {
+		return errors.New("Error setting answer")
+	}
+
+	err = d.Set("ttl", r.TTL)
+	if err != nil {
+		return errors.New("Error setting ttl")
+	}
+
+	err = d.Set("priority", r.Priority)
+	if err != nil {
+		return errors.New("Error setting priority")
+	}
+
+	return nil
 }
 
 func getRecordResourceData(d *schema.ResourceData) namecom.Record {
@@ -213,7 +249,7 @@ func getRecordResourceData(d *schema.ResourceData) namecom.Record {
 		DomainName: d.Get("zone").(string),
 		Host:       host,
 		Type:       d.Get("type").(string),
-		Answer:     d.Get("value").(string),
+		Answer:     d.Get("answer").(string),
 	}
 
 	ttl := d.Get("ttl").(int)
@@ -227,6 +263,11 @@ func getRecordResourceData(d *schema.ResourceData) namecom.Record {
 	}
 
 	return record
+}
+
+func recordId(id string) (int32, error) {
+	recordID, err := strconv.ParseInt(id, 10, 32)
+	return int32(recordID), err
 }
 
 func suppressHost(k, old, new string, d *schema.ResourceData) bool {

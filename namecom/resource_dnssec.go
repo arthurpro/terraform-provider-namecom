@@ -1,8 +1,10 @@
 package namecom
 
 import (
+	"context"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namedotcom/go/v4/namecom"
 	"github.com/pkg/errors"
@@ -10,19 +12,19 @@ import (
 
 func resourceDNSSEC() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceDNSSECCreate,
-		Read:   resourceDNSSECRead,
-		Delete: resourceDNSSECDelete,
+		CreateContext: resourceDNSSECCreate,
+		ReadContext:   resourceDNSSECRead,
+		DeleteContext: resourceDNSSECDelete,
 		Importer: &schema.ResourceImporter{
-			State: resourceDNSSECImporter,
+			StateContext: resourceDNSSECImporter,
 		},
 
 		Schema: map[string]*schema.Schema{
-			"domain_name": {
+			"zone": {
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				Description: "DomainName is the zone that the DNSSEC belongs to",
+				Description: "Zone is the domain name that the DNSSEC belongs to.",
 			},
 			"key_tag": {
 				Type:        schema.TypeInt,
@@ -34,7 +36,7 @@ func resourceDNSSEC() *schema.Resource {
 				Type:        schema.TypeInt,
 				Required:    true,
 				ForceNew:    true,
-				Description: "Algorithm is an integer identifying the algorithm used for signing. ",
+				Description: "Algorithm is an integer identifying the algorithm used for signing.",
 			},
 			"digest_type": {
 				Type:        schema.TypeInt,
@@ -53,10 +55,10 @@ func resourceDNSSEC() *schema.Resource {
 }
 
 // resourceDNSSECCreate creates a new DNSSEC in the Name.com API.
-func resourceDNSSECCreate(data *schema.ResourceData, meta interface{}) error {
+func resourceDNSSECCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	_, err := meta.(*namecom.NameCom).CreateDNSSEC(
 		&namecom.DNSSEC{
-			DomainName: data.Get("domain_name").(string),
+			DomainName: data.Get("zone").(string),
 			KeyTag:     data.Get("key_tag").(int32),
 			Algorithm:  data.Get("algorithm").(int32),
 			DigestType: data.Get("digest_type").(int32),
@@ -64,21 +66,21 @@ func resourceDNSSECCreate(data *schema.ResourceData, meta interface{}) error {
 		},
 	)
 	if err != nil {
-		return errors.Wrap(err, "Error CreateDNSSEC")
+		return diag.FromErr(errors.Wrap(err, "Error CreateDNSSEC"))
 	}
 
-	domainNameString, ok := data.Get("domain_name").(string)
+	domainNameString, ok := data.Get("zone").(string)
 	if !ok {
-		return errors.New("Error getting domain_name")
+		return diag.FromErr(errors.New("Error getting zone"))
 	}
 
 	data.SetId(domainNameString)
 
-	return resourceDNSSECRead(data, meta)
+	return resourceDNSSECRead(ctx, data, meta)
 }
 
 // resourceDNSSECImporter import existing DNSSEC from the Name.com API.
-func resourceDNSSECImporter(data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func resourceDNSSECImporter(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	client, ok := meta.(*namecom.NameCom)
 	if !ok {
 		return nil, errors.New("Error getting client")
@@ -99,9 +101,9 @@ func resourceDNSSECImporter(data *schema.ResourceData, meta interface{}) ([]*sch
 		return nil, errors.Wrap(err, "Error GetDNSSECRequest")
 	}
 
-	err = data.Set("domain_name", DNSSEC.DomainName)
+	err = data.Set("zone", DNSSEC.DomainName)
 	if err != nil {
-		return nil, errors.Wrap(err, "Error setting domain_name")
+		return nil, errors.Wrap(err, "Error setting zone")
 	}
 
 	err = data.Set("key_tag", int(DNSSEC.KeyTag))
@@ -131,30 +133,30 @@ func resourceDNSSECImporter(data *schema.ResourceData, meta interface{}) ([]*sch
 
 // resourceDNSSECImporterParseID parses the ID of the DNSSEC.
 func resourceDNSSECImporterParseID(id string) (domainName, digest string, err error) {
-	parts := strings.SplitN(id, "_", 2)
+	parts := strings.SplitN(id, "/", 2)
 
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", errors.New("unexpected format of ID, expected DomainName_Digest")
+		return "", "", errors.New("unexpected format of ID, expected Zone/Digest")
 	}
 
 	return parts[0], parts[1], nil
 }
 
 // resourceDNSSECRead reads a DNSSEC from the Name.com API.
-func resourceDNSSECRead(data *schema.ResourceData, meta interface{}) error {
+func resourceDNSSECRead(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client, ok := meta.(*namecom.NameCom)
 	if !ok {
-		return errors.New("Error getting client")
+		return diag.FromErr(errors.New("Error getting client"))
 	}
 
-	domainNameString, ok := data.Get("domain_name").(string)
+	domainNameString, ok := data.Get("zone").(string)
 	if !ok {
-		return errors.New("Error getting domain_name")
+		return diag.FromErr(errors.New("Error getting zone"))
 	}
 
 	digestString, ok := data.Get("digest").(string)
 	if !ok {
-		return errors.New("Error getting digest")
+		return diag.FromErr(errors.New("Error getting digest"))
 	}
 
 	request := namecom.GetDNSSECRequest{
@@ -164,52 +166,52 @@ func resourceDNSSECRead(data *schema.ResourceData, meta interface{}) error {
 
 	DNSSEC, err := client.GetDNSSEC(&request)
 	if err != nil {
-		return errors.Wrap(err, "Error GetDNSSECRequest")
+		return diag.FromErr(errors.Wrap(err, "Error GetDNSSECRequest"))
 	}
 
-	err = data.Set("domain_name", DNSSEC.DomainName)
+	err = data.Set("zone", DNSSEC.DomainName)
 	if err != nil {
-		return errors.Wrap(err, "Error setting domain_name")
+		return diag.FromErr(errors.Wrap(err, "Error setting zone"))
 	}
 
 	err = data.Set("key_tag", int(DNSSEC.KeyTag))
 	if err != nil {
-		return errors.Wrap(err, "Error setting key_tag")
+		return diag.FromErr(errors.Wrap(err, "Error setting key_tag"))
 	}
 
 	err = data.Set("algorithm", int(DNSSEC.Algorithm))
 	if err != nil {
-		return errors.Wrap(err, "Error setting algorithm")
+		return diag.FromErr(errors.Wrap(err, "Error setting algorithm"))
 	}
 
 	err = data.Set("digest_type", int(DNSSEC.DigestType))
 	if err != nil {
-		return errors.Wrap(err, "Error setting digest_type")
+		return diag.FromErr(errors.Wrap(err, "Error setting digest_type"))
 	}
 
 	err = data.Set("digest", DNSSEC.Digest)
 	if err != nil {
-		return errors.Wrap(err, "Error setting digest")
+		return diag.FromErr(errors.Wrap(err, "Error setting digest"))
 	}
 
 	return nil
 }
 
 // resourceDNSSECDelete deletes a DNSSEC from the Name.com API.
-func resourceDNSSECDelete(data *schema.ResourceData, meta interface{}) error {
+func resourceDNSSECDelete(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client, ok := meta.(*namecom.NameCom)
 	if !ok {
-		return errors.New("Error getting client")
+		return diag.FromErr(errors.New("Error getting client"))
 	}
 
-	domainNameString, ok := data.Get("domain_name").(string)
+	domainNameString, ok := data.Get("zone").(string)
 	if !ok {
-		return errors.New("Error getting domain_name")
+		return diag.FromErr(errors.New("Error getting zone"))
 	}
 
 	digestString, ok := data.Get("digest").(string)
 	if !ok {
-		return errors.New("Error getting digest")
+		return diag.FromErr(errors.New("Error getting digest"))
 	}
 
 	deleteRequest := namecom.DeleteDNSSECRequest{
@@ -219,7 +221,7 @@ func resourceDNSSECDelete(data *schema.ResourceData, meta interface{}) error {
 
 	_, err := client.DeleteDNSSEC(&deleteRequest)
 	if err != nil {
-		return errors.Wrap(err, "Error DeleteDNSSEC")
+		return diag.FromErr(errors.Wrap(err, "Error DeleteDNSSEC"))
 	}
 
 	data.SetId("")

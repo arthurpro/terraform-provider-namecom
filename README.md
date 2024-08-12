@@ -1,77 +1,82 @@
-# Terraform Provider for [name.com](https://name.com)
+# Terraform Provider for [Name.com](https://name.com)
 
-[API Docs](https://www.name.com/api-docs)
+[Name.com API Docs](https://www.name.com/api-docs)
 
-Currently only supports DNS records and setting nameservers for a domain zone.
+Supported features:
+
+- DNS records
+- NS records
+- DNSSEC
 
 ## Usage
 
-Username and token must be generated from
-`https://www.name.com/account/settings/api`
+Username and token must be generated from `https://www.name.com/account/settings/api`
 
 ```HCL
-provider "namecom" {
-  token = "0123456789"
-  username = "user"
-}
-
-// example.com CNAME -> bar.com
-resource "namecom_record" "bar" {
-  domain_name = "example.com"
-  host = ""
-  record_type = "cname"
-  answer = "bar.com"
-  ttl = 300
-}
-
-// foo.example.com -> 10.1.2.3
-resource "namecom_record" "foo" {
-  domain_name = "example.com"
-  host = "foo"
-  record_type = "A"
-  answer = "10.1.2.3"
-  ttl = 300
-}
-```
-
-Many records per domain example
-
-```HCL
-resource "namecom_record" "domain-me" {
-  domain_name = "domain.me"
-  record_type = "A"
-  
-  for_each = {
-    "" = local.t6
-    www = local.t8
-    www1 = local.t8
-    www2 = local.t9
+# Set up the provider
+terraform {
+  required_providers {
+    namecom = {
+      source  = "arthurpro/namecom"
+      version = "1.0.0"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "3.38.0"
+    }
   }
-
-  host = each.key
-  answer = each.value
-  ttl = 300
 }
-```
 
-Setting nameservers from a generated hosted_zone
-
-```HCL
 provider "aws" {
   region = "us-west-2"
-}
-
-provider "namecom" {
-  token = "0123456789"
-  username = "user"
 }
 
 resource "aws_route53_zone" "example_com" {
   name = "example.com"
 }
 
-resource "namecom_domain_nameservers" "example_com" {
-  domain_name = "example.com"
+# Create the provider with your account details
+provider "namecom" {
+  username = var.namecom_username
+  token    = var.namecom_token
+  #  test     = true # enable to use test API
+}
+# username and token default to NAMECOM_USER and NAMECOM_TOKEN environment variables
+
+# Example usage for creating DNS records
+resource "namecom_record" "bar" {
+  zone   = "example.com"
+  host   = ""
+  type   = "cname"
+  answer = "foo.com"
+}
+
+resource "namecom_record" "foo" {
+  zone   = "example.com"
+  host   = "foo"
+  type   = "A"
+  answer = "1.2.3.4"
+}
+
+# Example usage for creating many records per domain
+resource "namecom_record" "test" {
+  zone = "test.com"
+  type = "A"
+
+  for_each = {
+    ""   = "1.2.3.4"
+    www  = "2.3.4.5"
+    www1 = "3.4.5.6"
+    www2 = "4.5.6.7"
+  }
+
+  host   = each.key
+  answer = each.value
+}
+
+# Example usage for setting nameservers from a generated hosted_zone
+resource "namecom_nameservers" "example_com" {
+  zone = "example.com"
   nameservers = [
     "${aws_route53_zone.example_com.name_servers.0}",
     "${aws_route53_zone.example_com.name_servers.1}",
@@ -79,5 +84,54 @@ resource "namecom_domain_nameservers" "example_com" {
     "${aws_route53_zone.example_com.name_servers.3}",
   ]
 }
+
+# Example usage for using DNSSEC
+resource "aws_route53_key_signing_key" "dnssec" {
+  name           = data.aws_route53_zone.example_com.name
+  hosted_zone_id = data.aws_route53_zone.example_com.id
+
+  key_management_service_arn = aws_kms_key.dnssec.arn
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "namecom_dnssec" "dnssec" {
+  zone        = aws_route53_zone.example_com.name
+  key_tag     = aws_route53_key_signing_key.dnssec.key_tag
+  algorithm   = aws_route53_key_signing_key.dnssec.signing_algorithm_type
+  digest_type = aws_route53_key_signing_key.dnssec.digest_algorithm_type
+  digest      = aws_route53_key_signing_key.dnssec.digest_value
+}
 ```
 
+### Importing DNS records
+
+You need to use format `domain/recordID` as last parameter for import command
+
+```bash
+# Import single record
+terraform import namecom_record.example_record example.com/23456
+
+# Import one of the mentioned records in for_each
+terraform import 'namecom_record.example_record["www"]' example.com/23456
+```
+
+To get recordId, you need to use Name.com API for domain ListRecords and use ID for appropriate host
+
+```bash
+curl -u 'username:token' 'https://api.name.com/v4/domains/example.org/records'
+```
+
+### Importing DNSSEC
+
+You need to use format "domain" as last parameter for import command
+
+```bash
+# Import single record
+terraform import namecom_dnssec.dnssec example.com/digest
+
+# Import one of the mentioned records in for_each
+terraform import 'namecom_dnssec.dnssec["example.com"]' example.com
+```

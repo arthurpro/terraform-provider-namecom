@@ -1,6 +1,9 @@
 package namecom
 
 import (
+	"context"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namedotcom/go/v4/namecom"
 	"github.com/pkg/errors"
@@ -8,12 +11,12 @@ import (
 
 func resourceNameservers() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceNameserversSet,
-		Read:   resourceNameserversGet,
-		Update: resourceNameserversSet,
-		Delete: resourceNameserversDelete,
+		CreateContext: resourceNameserversSet,
+		ReadContext:   resourceNameserversGet,
+		UpdateContext: resourceNameserversSet,
+		DeleteContext: resourceNameserversDelete,
 		Importer: &schema.ResourceImporter{
-			State: resourceNameserversImport,
+			StateContext: resourceNameserversImporter,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -22,25 +25,20 @@ func resourceNameservers() *schema.Resource {
 				Required:    true,
 				Description: "Zone is the domain name to set the nameservers for.",
 			},
-			"domain_name": {
-				Type:        schema.TypeString,
-				Computed:    true,
-				Description: "DomainName is the domain name to set the nameservers for.",
-			},
 			"nameservers": {
 				Type:        schema.TypeList,
 				Required:    true,
-				Description: "Namesevers is a list of the nameservers to set. Nameservers should already be set up and hosting the zone properly as some registries will verify before allowing the change.",
+				Description: "Nameservers is a list of the nameservers to set. Nameservers should already be set up and hosting the zone properly as some registries will verify before allowing the change.",
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
 		},
 	}
 }
 
-func resourceNameserversSet(d *schema.ResourceData, m interface{}) error {
+func resourceNameserversSet(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 
-	domainName := d.Get("domain_name").(string)
+	domainName := d.Get("zone").(string)
 
 	request := namecom.SetNameserversRequest{
 		DomainName: domainName,
@@ -50,38 +48,57 @@ func resourceNameserversSet(d *schema.ResourceData, m interface{}) error {
 	}
 
 	if domain, err := client.SetNameservers(&request); err != nil {
-		return errors.Wrap(err, "Error SetNameservers")
+		return diag.FromErr(errors.Wrap(err, "Error SetNameservers"))
 	} else {
 		d.SetId(domain.DomainName)
-		d.Set("nameservers", domain.Nameservers)
-		d.Set("zone", domain.DomainName)
+
+		err = d.Set("zone", domain.DomainName)
+		if err != nil {
+			return diag.FromErr(errors.New("Error setting zone"))
+		}
+
+		err = d.Set("nameservers", domain.Nameservers)
+		if err != nil {
+			return diag.FromErr(errors.New("Error setting nameservers"))
+		}
 	}
 
 	return nil
 }
 
-func resourceNameserversGet(d *schema.ResourceData, m interface{}) error {
+func resourceNameserversGet(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*namecom.NameCom)
 
-	domainName := d.Get("domain_name").(string)
+	domainName := d.Get("zone").(string)
 
 	request := namecom.GetDomainRequest{
 		DomainName: domainName,
 	}
 
 	if domain, err := client.GetDomain(&request); err != nil {
-		return errors.Wrap(err, "Error GetDomain")
+		return diag.FromErr(errors.Wrap(err, "Error GetDomain"))
 	} else {
-		d.Set("nameservers", domain.Nameservers)
+		err = d.Set("nameservers", domain.Nameservers)
+		if err != nil {
+			return diag.FromErr(errors.New("Error setting nameservers"))
+		}
 	}
 
 	return nil
 }
 
-func resourceNameserversDelete(d *schema.ResourceData, m interface{}) error {
-	err := resourceNameserversSet(d, m)
-	if err != nil {
-		return err
+func resourceNameserversDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	client := m.(*namecom.NameCom)
+
+	domainName := d.Id()
+
+	request := namecom.SetNameserversRequest{
+		DomainName:  domainName,
+		Nameservers: defaultNameservers(),
+	}
+
+	if _, err := client.SetNameservers(&request); err != nil {
+		return diag.FromErr(errors.Wrap(err, "Error SetNameservers"))
 	}
 
 	d.SetId("")
@@ -89,7 +106,7 @@ func resourceNameserversDelete(d *schema.ResourceData, m interface{}) error {
 	return nil
 }
 
-func resourceNameserversImport(d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
+func resourceNameserversImporter(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
 	client := m.(*namecom.NameCom)
 
 	request := namecom.GetDomainRequest{
@@ -100,10 +117,26 @@ func resourceNameserversImport(d *schema.ResourceData, m interface{}) ([]*schema
 		return nil, errors.Wrap(err, "Error GetDomain")
 	} else {
 		d.SetId(domain.DomainName)
-		d.Set("domain_name", domain.DomainName)
-		d.Set("zone", domain.DomainName)
-		d.Set("nameservers", domain.Nameservers)
+
+		err = d.Set("zone", domain.DomainName)
+		if err != nil {
+			return nil, errors.Wrap(err, "Error setting zone")
+		}
+
+		err = d.Set("nameservers", domain.Nameservers)
+		if err != nil {
+			return nil, errors.Wrap(err, "Error setting nameservers")
+		}
 	}
 
 	return []*schema.ResourceData{d}, nil
+}
+
+func defaultNameservers() []string {
+	return []string{
+		"ns1.name.com",
+		"ns2.name.com",
+		"ns3.name.com",
+		"ns4.name.com",
+	}
 }
